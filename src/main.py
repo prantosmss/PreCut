@@ -15,6 +15,7 @@ from page_transcript import TranscriptGenerator
 from page_clips import ClipsDownloader
 from page_proxy import ProxyDownloader
 from page_ost import OSTDownloader
+from page_walkthrough import WalkthroughDownloader
 from page_settings import Settings
 from PIL import Image, ImageTk
 from utils import check_dependencies, get_asset_path
@@ -139,7 +140,7 @@ class Sidebar(ctk.CTkFrame):
         self.buttons = {}
 
         # Logo / Title
-        self.logo_label = ctk.CTkLabel(self, text="PRECUT 2.1", font=FONTS["title"], text_color=COLORS["accent_crimson"])
+        self.logo_label = ctk.CTkLabel(self, text="PRECUT 2.2", font=FONTS["title"], text_color=COLORS["accent_crimson"])
         self.logo_label.pack(pady=(40, 40), padx=20)
 
         # Home button (fixed)
@@ -178,7 +179,7 @@ if __name__ == "__main__":
     setup_theme()
     
     root = ctk.CTk()
-    root.title("PreCut 2.1 - Content Workflow Suite")
+    root.title("PreCut 2.2 - Content Workflow Suite")
     root.geometry('1100x750+450+150')
     root.configure(fg_color=COLORS["bg_dark"])
 
@@ -205,6 +206,7 @@ if __name__ == "__main__":
 
     services.add_page(image_path=get_asset_path('assets/transcript_generator.png'), service_name='Transcript Generator', page=TranscriptGenerator)
     services.add_page(image_path=get_asset_path('assets/clips_downloader.png'), service_name='Clip Downloader', page=ClipsDownloader)
+    services.add_page(image_path=get_asset_path('assets/walkthrough_downloader.png'), service_name='Walkthrough Downloader', page=WalkthroughDownloader)
     services.add_page(image_path=get_asset_path('assets/proxy_downloader.png'), service_name='Proxy Downloader', page=ProxyDownloader)
     services.add_page(image_path=get_asset_path('assets/ost_downloader.png'), service_name='OST Downloader', page=OSTDownloader)
     services.add_page(image_path=get_asset_path('assets/settings.png'), service_name='Settings', page=Settings)

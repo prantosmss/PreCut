@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.2.0] - 2026-11-15
+
+### Added
+- **Walkthrough Downloader**: New IGN-focused download page in the sidebar (gamepad icon). Paste an IGN video or wiki page link and the page scans it in the background, filling a **Video** selector with every walkthrough video it finds on that page. Quality (`1080p` / `720p` / `480p` / `360p`) caps the chosen HLS rendition, and files are saved to the project's `Walkthrough/` folder.
+- **IGN Stream Resolver (`src/ign_dl.py`)**: Reads IGN's Next.js `__NEXT_DATA__` payload to locate the real `master.m3u8` stream for video pages and wiki pages. yt-dlp's built-in IGN extractor relies on a retired `apis.ign.com` endpoint and no longer works, so the resolver replaces it.
+- **Resolver-Aware Download Cards**: `DownloadCard` now accepts an optional `url_resolver`, allowing pages to resolve non-yt-dlp links off the UI thread and name the output after the real video title. Pause/resume, cancellation, logging and 44.1 kHz audio normalization all continue to work.
+
+### Changed
+- Sidebar now lists 6 pages; **Walkthrough Downloader** sits between Clip Downloader and Proxy Downloader.
+
 ## [2.1.2] - 2026-08-29
 
 ### Fixed

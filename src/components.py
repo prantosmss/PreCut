@@ -37,7 +37,8 @@ class YdlPanelLogger:
 
 
 class DownloadCard(ctk.CTkFrame):
-    def __init__(self, master, url, ydl_opts, on_finish_callback=None, post_download_callback=None, **kw):
+    def __init__(self, master, url, ydl_opts, on_finish_callback=None, post_download_callback=None,
+                 url_resolver=None, **kw):
         if 'fg_color' not in kw:
             kw['fg_color'] = COLORS["bg_card"]
         super().__init__(master, corner_radius=12, **kw)
@@ -46,6 +47,12 @@ class DownloadCard(ctk.CTkFrame):
         self.ydl_opts = dict(ydl_opts)
         self.on_finish_callback = on_finish_callback
         self.post_download_callback = post_download_callback
+        # Optional callable(url) -> {"url": target, "info": {...}, "filename_base": str}
+        # Used by pages whose links need resolving before yt-dlp can handle them.
+        self.url_resolver = url_resolver
+        self._resolved_target = None
+        self._resolved_info = None
+        self._fixed_title = None
         self.cancel_requested = False
         self._closed = False
         self.downloaded_files = []
@@ -111,12 +118,28 @@ class DownloadCard(ctk.CTkFrame):
             runtime_opts["logger"] = YdlPanelLogger(self)
             runtime_opts["progress_hooks"] = [self.on_progress_update]
 
+            if self.url_resolver is not None and self._resolved_target is None:
+                resolved = self.url_resolver(self.url)
+                if self.cancel_requested:
+                    raise DownloadCancelled()
+
+                self._resolved_target = resolved.get("url") or self.url
+                self._resolved_info = resolved.get("info") or {}
+                self._fixed_title = self._resolved_info.get("title") or None
+                self._apply_resolved_outtmpl(
+                    resolved.get("filename_base") or self._fixed_title, runtime_opts
+                )
+
+            target_url = self._resolved_target or self.url
+            info = self._resolved_info
+
             with yt_dlp.YoutubeDL(runtime_opts) as ydl:
-                info = ydl.extract_info(self.url, download=False)
+                if info is None:
+                    info = ydl.extract_info(target_url, download=False)
 
                 is_playlist = info.get('_type') == 'playlist'
-                title = info.get("title", "Unknown Video")
-                if is_playlist:
+                title = self._fixed_title or info.get("title", "Unknown Video")
+                if is_playlist and not self._fixed_title:
                     title = f"Playlist: {title}"
 
                 thumb_url = info.get("thumbnail")
@@ -128,7 +151,7 @@ class DownloadCard(ctk.CTkFrame):
                     threading.Thread(target=self.load_thumbnail, args=(thumb_url,), daemon=True).start()
 
                 self._pre_download_files = self._snapshot_output_dir()
-                ydl.download([self.url])
+                ydl.download([target_url])
 
             if self.cancel_requested:
                 self.queue_log("[download] Cancelled by user.\n")
@@ -176,6 +199,33 @@ class DownloadCard(ctk.CTkFrame):
                 self.thumb_label.configure(image=self.thumbnail_ref, text="")
         except Exception:
             pass
+
+    def _apply_resolved_outtmpl(self, title, runtime_opts):
+        """Name the output file after the resolved title instead of the stream name."""
+        if not title:
+            return
+        try:
+            from yt_dlp.utils import sanitize_filename
+            base = sanitize_filename(str(title), restricted=False)
+        except Exception:
+            base = str(title)
+
+        base = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", base).strip(" .")
+        if len(base) > 120:
+            base = base[:120].rstrip(" .")
+        if not base:
+            return
+
+        # Escape literal percent signs so yt-dlp does not treat them as template fields.
+        base = base.replace("%", "%%")
+
+        current = self.ydl_opts.get("outtmpl")
+        if not current:
+            return
+
+        outtmpl = os.path.join(os.path.dirname(current), f"{base}.%(ext)s")
+        self.ydl_opts["outtmpl"] = outtmpl
+        runtime_opts["outtmpl"] = outtmpl
 
     def _snapshot_output_dir(self):
         outtmpl = self.ydl_opts.get("outtmpl", "")
@@ -282,7 +332,9 @@ class DownloadCard(ctk.CTkFrame):
         info_dict = data.get("info_dict", {})
         if info_dict:
             new_title = info_dict.get("title")
-            if new_title and new_title != self.title_label.cget("text"):
+            # When a URL resolver supplied the real title, keep it (stream names
+            # such as "master" must not overwrite it).
+            if new_title and not self._fixed_title and new_title != self.title_label.cget("text"):
                 self.after(0, lambda t=new_title: self.title_label.configure(text=t))
 
             new_thumb = info_dict.get("thumbnail")

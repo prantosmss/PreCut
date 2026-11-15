@@ -47,6 +47,7 @@ DEFAULT_SETTINGS = {
     "ost_format": "MP3",
     "ost_bitrate": "192k",
     "transcript_format": "Plain Text (.txt)",
+    "walkthrough_quality": "Up to 1080p",
     "use_cookies": False,
     "cookie_file": "",
     "use_ejs": True,

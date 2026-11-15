@@ -4,7 +4,7 @@
 
 A modern, dark-themed desktop application designed to streamline video content creation workflows. **PreCut** provides a centralized interface for generating transcripts, downloading high-quality clips, and managing low-resolution proxies with real-time feedback and smart concurrency management.
 
-> **PreCut v2.1.1** — Added **OST Downloader** for audio extraction (MP3/FLAC/AAC), per-page settings for Clips/Proxy/OST/Transcript, and improved UI responsiveness. Refactored into modular architecture. Now portable app stores data in native folder.
+> **PreCut v2.2.0** — Added the **Walkthrough Downloader** for IGN videos and wiki walkthroughs, with a built-in IGN stream resolver that replaces yt-dlp's retired IGN extractor. Also includes per-page settings for Clips/Proxy/OST/Transcript and the portable `data/` folder layout.
 
 ---
 
@@ -12,6 +12,7 @@ A modern, dark-themed desktop application designed to streamline video content c
 
 - **📺 Transcript Generator**: Automatically fetch and clean transcripts from online video sources. Strips WebVTT formatting, timestamps, and redundant tags. Export as **Plain Text** or **Markdown**.
 - **📥 Clips Downloader**: Download high-quality video clips with inline quality and codec selectors. Features a custom inline terminal log for real-time `yt-dlp` transparency.
+- **🎮 Walkthrough Downloader**: Paste any IGN video or wiki page link and pick a walkthrough video from the inline selector. Resolves the real 1080p HLS stream directly from IGN, bypassing yt-dlp's retired IGN extractor. Files are saved to your project's `Walkthrough/` folder.
 - **⚡ Proxy Downloader**: Create lightweight proxies with inline quality selector for faster editing timelines. Downloads the best available H.264 stream, then converts it to **ProRes 422** (`.mov`) via FFmpeg. Files are saved directly to `C:/Proxies`.
 - **🎵 OST Downloader**: Extract audio soundtracks from videos. Choose between **MP3, FLAC, and AAC** formats with selectable bitrates (128k–320k). FLAC auto-disables bitrate. Files saved to your project's `OST/` folder.
 - **🎵 Unified Audio Sample Rate (44.1 kHz)**: Clips and Proxies use a hybrid strategy that prefers native `44.1 kHz` tracks (`asr=44100`) and only falls back to `ffmpeg` audio resampling if a source resolves to another rate.
@@ -108,6 +109,8 @@ PreCut/
 │   ├── page_home.py        # Project folder selection
 │   ├── page_transcript.py  # Transcript Generator
 │   ├── page_clips.py       # Clips Downloader
+│   ├── page_walkthrough.py # Walkthrough Downloader (IGN)
+│   ├── ign_dl.py           # IGN page/stream resolver
 │   ├── page_proxy.py       # Proxy Downloader
 │   ├── page_ost.py         # OST Audio Downloader
 │   └── page_settings.py    # Cookies and EJS settings
