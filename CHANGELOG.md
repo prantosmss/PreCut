@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.3.0] - 2026-11-16
+
+### Added
+- **Optional aria2c Downloads**: New persisted `use_aria2c` setting (default `false`) with a **Use aria2c for direct downloads** toggle in Settings. When enabled, direct HTTP/HTTPS downloads run through the bundled `aria2c.exe` with 16 connections/segments (`-x16 -s16 -k1M --file-allocation=none`). HLS/DASH streams (e.g. IGN walkthroughs) always stay on yt-dlp's native downloaders.
+- **Bundled aria2c 1.37.0**: `assets/bin/aria2c.exe` is shipped with the app and embedded into the portable executable by `build.py` via PyInstaller's `--add-binary`. Attribution and GPLv2 license text live in `THIRD_PARTY.md`.
+
+### Changed
+- **aria2c Progress Reporting**: Since external downloaders emit no yt-dlp progress hooks, a background monitor polls the `.part` file so percentage, speed, and size keep updating while aria2c runs.
+- **aria2c Cancellation**: Cancel and pause terminate the matching aria2c process tree (tracked through a per-download `--log` marker plus `--stop-with-process`), so no orphaned downloader is left behind.
+- **Graceful toggle fallback**: If `assets/bin/aria2c.exe` is missing (e.g. a plain source checkout), the Settings toggle is disabled and downloads silently use yt-dlp's native downloader.
+
 ## [2.2.0] - 2026-11-15
 
 ### Added

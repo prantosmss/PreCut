@@ -140,7 +140,7 @@ class Sidebar(ctk.CTkFrame):
         self.buttons = {}
 
         # Logo / Title
-        self.logo_label = ctk.CTkLabel(self, text="PRECUT 2.2", font=FONTS["title"], text_color=COLORS["accent_crimson"])
+        self.logo_label = ctk.CTkLabel(self, text="PRECUT 2.3", font=FONTS["title"], text_color=COLORS["accent_crimson"])
         self.logo_label.pack(pady=(40, 40), padx=20)
 
         # Home button (fixed)
@@ -179,7 +179,7 @@ if __name__ == "__main__":
     setup_theme()
     
     root = ctk.CTk()
-    root.title("PreCut 2.2 - Content Workflow Suite")
+    root.title("PreCut 2.3 - Content Workflow Suite")
     root.geometry('1100x750+450+150')
     root.configure(fg_color=COLORS["bg_dark"])
 
