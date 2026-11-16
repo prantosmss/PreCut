@@ -17,6 +17,7 @@ A modern, dark-themed desktop application designed to streamline video content c
 - **🎵 OST Downloader**: Extract audio soundtracks from videos. Choose between **MP3, FLAC, and AAC** formats with selectable bitrates (128k–320k). FLAC auto-disables bitrate. Files saved to your project's `OST/` folder.
 - **🎵 Unified Audio Sample Rate (44.1 kHz)**: Clips and Proxies use a hybrid strategy that prefers native `44.1 kHz` tracks (`asr=44100`) and only falls back to `ffmpeg` audio resampling if a source resolves to another rate.
 - **🎬 Codec Selector**: Choose between H.264 (Compatible), AV1 (Efficient), and VP9 (Highest Quality). Defaults to H.264 for perfect compatibility with Adobe Premiere Pro and DaVinci Resolve.
+- **⚡ Optional aria2c Downloads**: Toggle **Use aria2c for direct downloads** in Settings to route HTTP/HTTPS downloads through the bundled `aria2c.exe` (16 connections/segments). HLS/DASH streams (e.g. IGN walkthroughs) always stay on yt-dlp's native downloader. aria2 is GPLv2 — see [THIRD_PARTY.md](THIRD_PARTY.md) for the license and source link.
 - **🍪 Toggleable Cookies & EJS Support**: Handle bot-check-gated videos using either a standard cookie file or the new **EJS (External JavaScript)** solver. EJS uses local runtimes to solve challenges on-the-fly, significantly improving bypass reliability.
 - **🧠 Smart Runtime Detection**: Built-in system check automatically detects Node.js, Deno, Bun, or QuickJS. The app prevents enabling EJS if no runtime is found and filters the selector to only show installed options, ensuring a foolproof setup.
 - **🧠 JS Runtime Integration**: Choose between multiple runtimes in Settings to power the EJS challenge solver. Automatically pulls the latest solver scripts from GitHub to ensure long-term stability.
@@ -70,6 +71,7 @@ For users who want to run **PreCut** without installing Python or any libraries,
 - **Python 3.10+**
 - **yt_dlp Python Package**: Automatically installed via `pip install -r requirements.txt`. No standalone `yt-dlp` executable in PATH is required anymore!
 - **FFmpeg**: Required for merging high-quality video/audio streams.
+- **aria2c** (optional): bundled at `assets/bin/aria2c.exe`; no separate install is needed. `python build.py` embeds it in the portable executable via PyInstaller's `--add-binary`.
 
 > [!IMPORTANT]
 > **FFmpeg must be installed and added to your system environment variables (PATH)**. Without it, high-quality downloads and format merging will fail.
@@ -99,6 +101,7 @@ For users who want to run **PreCut** without installing Python or any libraries,
 ```text
 PreCut/
 ├── assets/                 # UI Icons and Brand Assets
+│   └── bin/aria2c.exe      # Bundled aria2 downloader (GPLv2, see THIRD_PARTY.md)
 ├── src/
 │   ├── main.py             # Entry point and sidebar navigation
 │   ├── ui_page.py          # Page base class and shared utilities
@@ -128,6 +131,8 @@ PreCut stores its data outside the source folder to ensure a portable and clean 
 - **Cookie Flags in Settings**:
   - `use_cookies` (default: `false`)
   - `cookie_file` (default: empty)
+- **Downloader Settings**:
+  - `use_aria2c` (default: `false`) — use the bundled `assets/bin/aria2c.exe` for direct HTTP/HTTPS downloads
 
 ---
 

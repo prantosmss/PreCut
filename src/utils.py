@@ -33,6 +33,15 @@ def get_asset_path(relative_path):
     # Try one level up (dev mode: utils.py is in src/, assets are in ../assets)
     return os.path.join(base_path, "..", relative_path)
 
+def get_aria2c_path():
+    """Return the bundled aria2c executable, or None if it is not present.
+
+    Works in dev (assets/bin/aria2c.exe) and in PyInstaller onefile builds
+    (assets/bin/aria2c.exe is unpacked into sys._MEIPASS).
+    """
+    path = get_asset_path(os.path.join("assets", "bin", "aria2c.exe"))
+    return path if os.path.isfile(path) else None
+
 def check_dependencies():
     """Check if required external tools are available in PATH"""
     missing = []

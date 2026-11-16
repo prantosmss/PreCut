@@ -50,6 +50,7 @@ DEFAULT_SETTINGS = {
     "walkthrough_quality": "Up to 1080p",
     "use_cookies": False,
     "cookie_file": "",
+    "use_aria2c": False,
     "use_ejs": True,
     "js_runtime": "deno",
     "project_folder": "",

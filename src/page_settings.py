@@ -5,7 +5,7 @@ import os
 
 from ui_page import Page
 from config import app_config
-from utils import get_available_js_runtimes
+from utils import get_aria2c_path, get_available_js_runtimes
 from ui_theme import COLORS, FONTS
 
 
@@ -60,6 +60,34 @@ class Settings(Page):
         )
         self.cookie_select_button.pack(side=tk.LEFT, ipady=6, ipadx=12)
         self.on_cookies_toggle()
+
+        # aria2c External Downloader
+        aria2c_frame = ctk.CTkFrame(self.frame_content, fg_color="transparent")
+        aria2c_frame.pack(fill=tk.X, padx=30, pady=10)
+
+        self.aria2c_path = get_aria2c_path()
+        self.use_aria2c_var = tk.BooleanVar(
+            value=bool(app_config.get("use_aria2c")) and self.aria2c_path is not None
+        )
+        self.use_aria2c_cb = ctk.CTkCheckBox(
+            aria2c_frame,
+            text="Use aria2c for direct downloads",
+            variable=self.use_aria2c_var,
+            fg_color=COLORS["accent_crimson"],
+            hover_color=COLORS["accent_glow"],
+            font=FONTS["body_bold"]
+        )
+        self.use_aria2c_cb.pack(side=tk.LEFT, padx=(0, 20))
+
+        if self.aria2c_path is None:
+            # No bundled binary (e.g. a source checkout without assets/bin/aria2c.exe).
+            self.use_aria2c_cb.configure(state="disabled")
+            aria2c_hint = "aria2c.exe is missing from assets/bin — yt-dlp's native downloader is used."
+        else:
+            aria2c_hint = "Multi-connection HTTP/HTTPS downloads. HLS/DASH streams stay on yt-dlp."
+        ctk.CTkLabel(
+            aria2c_frame, text=aria2c_hint, font=FONTS["small"], text_color=COLORS["text_dim"]
+        ).pack(side=tk.LEFT)
 
         # EJS Challenge Solver
         ejs_frame = ctk.CTkFrame(self.frame_content, fg_color="transparent")
@@ -151,8 +179,11 @@ class Settings(Page):
             messagebox.showerror("Settings Error", "Please install a JS runtime to use EJS.")
             return
 
+        use_aria2c = self.use_aria2c_var.get() and self.aria2c_path is not None
+
         app_config.set("use_cookies", use_cookies)
         app_config.set("cookie_file", cookie_file)
+        app_config.set("use_aria2c", use_aria2c)
         app_config.set("use_ejs", use_ejs)
         app_config.set("js_runtime", js_runtime)
 
@@ -168,6 +199,7 @@ class Settings(Page):
         app_config.set("transcript_format", "Plain Text (.txt)")
         app_config.set("use_cookies", False)
         app_config.set("cookie_file", "")
+        app_config.set("use_aria2c", False)
         app_config.set("use_ejs", True)
         app_config.set("js_runtime", "deno")
 
@@ -176,6 +208,7 @@ class Settings(Page):
         self.use_cookies_var.set(False)
         self.cookie_file_var.set("")
         self.on_cookies_toggle()
+        self.use_aria2c_var.set(False)
         self.use_ejs_var.set(True)
         self.js_runtime_var.set("deno")
         self.on_ejs_toggle()

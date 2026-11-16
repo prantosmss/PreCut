@@ -46,6 +46,7 @@ def build():
         f"--icon={ICON_PATH}",
         "--paths=src",
         f"--add-data={ASSETS_DIR};assets",
+        f"--add-binary={os.path.join('assets', 'bin', 'aria2c.exe')};assets/bin",
         "--collect-all=customtkinter",
         "--collect-data=yt_dlp",
         ENTRY_POINT,

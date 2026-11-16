@@ -5,13 +5,23 @@ import threading
 import subprocess
 import os
 import re
+import tempfile
+import time
+import uuid
 
 import yt_dlp
 import requests
 from io import BytesIO
 from PIL import Image
 
+from config import app_config
+from utils import get_aria2c_path
 from ui_theme import COLORS, FONTS
+
+
+# aria2c flags requested for multi-connection direct downloads.
+ARIA2C_ARGS = ["-x16", "-s16", "-k1M", "--file-allocation=none"]
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
 class DownloadCancelled(Exception):
@@ -20,6 +30,116 @@ class DownloadCancelled(Exception):
 
 class DownloadPaused(Exception):
     pass
+
+
+def _new_aria2c_marker():
+    """Unique per-download log path, used to find the aria2c child process."""
+    return os.path.join(tempfile.gettempdir(), f"precut-aria2c-{uuid.uuid4().hex}.log")
+
+
+def apply_aria2c_options(runtime_opts, marker):
+    """Use the bundled aria2c for direct HTTP(S) downloads when the setting is on.
+
+    The protocol-keyed mapping intentionally omits m3u8/dash so HLS/DASH stay on
+    yt-dlp's native downloaders (aria2c cannot handle those manifests).
+    Returns True when the external downloader was configured.
+    """
+    aria2c_path = get_aria2c_path()
+    if not aria2c_path or not bool(app_config.get("use_aria2c")):
+        return False
+
+    runtime_opts["external_downloader"] = {"http": aria2c_path, "https": aria2c_path}
+    runtime_opts["external_downloader_args"] = {"aria2c": [
+        *ARIA2C_ARGS,
+        # The marker also lets us find/kill this exact aria2c process on cancel.
+        f"--log={marker}",
+        "--log-level=warn",
+        # Never leave an orphaned aria2c behind if PreCut exits unexpectedly.
+        f"--stop-with-process={os.getpid()}",
+    ]}
+    return True
+
+
+def _aria2c_pids(marker):
+    """PIDs of aria2c processes started for this download (matched by the marker)."""
+    if os.name != "nt":
+        return []
+    script = (
+        "Get-CimInstance Win32_Process -Filter \"Name='aria2c.exe'\" | "
+        "Where-Object { $_.CommandLine -and $_.CommandLine.Contains($env:PRECUT_ARIA2C_MARKER) } | "
+        "ForEach-Object { $_.ProcessId }"
+    )
+    env = os.environ.copy()
+    env["PRECUT_ARIA2C_MARKER"] = marker
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True, text=True, env=env, timeout=20,
+            creationflags=_NO_WINDOW,
+        )
+    except Exception:
+        return []
+    return [int(token) for token in result.stdout.split() if token.isdigit()]
+
+
+def terminate_aria2c(marker):
+    """Terminate the aria2c process tree used by a download (best effort)."""
+    if not marker:
+        return
+    for pid in _aria2c_pids(marker):
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                capture_output=True, timeout=15, creationflags=_NO_WINDOW,
+            )
+        except Exception:
+            pass
+
+
+def _human_bytes(num):
+    num = float(num or 0)
+    for unit in ("B", "KiB", "MiB", "GiB"):
+        if num < 1024 or unit == "GiB":
+            return f"{num:.0f}{unit}" if unit == "B" else f"{num:.1f}{unit}"
+        num /= 1024
+    return f"{num:.1f}GiB"
+
+
+def _watch_aria2c_progress(panel, marker, out_dir, prefix, total_bytes, done):
+    """Poll aria2c's .part file: external downloads emit no yt-dlp progress hooks."""
+    if not out_dir or not prefix:
+        return
+    last_bytes, last_time = 0, time.monotonic()
+    killed = False
+    while not done.wait(0.5):
+        # Catch cancel/pause clicks that land while yt-dlp is still spawning
+        # aria2c (the progress hooks will not fire until it finishes).
+        if not killed and (panel.cancel_requested or panel.is_paused):
+            killed = True
+            terminate_aria2c(marker)
+        try:
+            downloaded = sum(
+                os.path.getsize(os.path.join(out_dir, name))
+                for name in os.listdir(out_dir)
+                if name.startswith(prefix) and name.endswith(".part")
+            )
+        except OSError:
+            continue
+        now = time.monotonic()
+        speed = max(downloaded - last_bytes, 0) / max(now - last_time, 0.001)
+        last_bytes, last_time = downloaded, now
+        percent = (downloaded / total_bytes * 100.0) if total_bytes else 0.0
+        size_info = f"{_human_bytes(downloaded)} / " + (
+            _human_bytes(total_bytes) if total_bytes else "--"
+        )
+        try:
+            panel.after(
+                0,
+                lambda p=percent, s=f"{_human_bytes(speed)}/s", si=size_info:
+                    panel.update_progress(p, s, si),
+            )
+        except Exception:
+            return
 
 
 class YdlPanelLogger:
@@ -57,6 +177,8 @@ class DownloadCard(ctk.CTkFrame):
         self._closed = False
         self.downloaded_files = []
         self.show_logs = False
+        self.aria2c_marker = None
+        self._aria2c_done = threading.Event()
 
         self.grid_columnconfigure(1, weight=1)
 
@@ -118,6 +240,10 @@ class DownloadCard(ctk.CTkFrame):
             runtime_opts["logger"] = YdlPanelLogger(self)
             runtime_opts["progress_hooks"] = [self.on_progress_update]
 
+            self.aria2c_marker = _new_aria2c_marker()
+            if not apply_aria2c_options(runtime_opts, self.aria2c_marker):
+                self.aria2c_marker = None
+
             if self.url_resolver is not None and self._resolved_target is None:
                 resolved = self.url_resolver(self.url)
                 if self.cancel_requested:
@@ -150,6 +276,14 @@ class DownloadCard(ctk.CTkFrame):
                 if thumb_url:
                     threading.Thread(target=self.load_thumbnail, args=(thumb_url,), daemon=True).start()
 
+                if self.aria2c_marker:
+                    self._start_aria2c_monitor(ydl, info)
+
+                if self.cancel_requested:
+                    raise DownloadCancelled()
+                if self.is_paused:
+                    raise DownloadPaused()
+
                 self._pre_download_files = self._snapshot_output_dir()
                 ydl.download([target_url])
 
@@ -171,12 +305,66 @@ class DownloadCard(ctk.CTkFrame):
                 self.queue_log("[download] Cancelled by user.\n")
                 self.after(0, self._close_panel)
         except yt_dlp.utils.DownloadError as e:
-            if not self.cancel_requested:
+            # Killing aria2c mid-download surfaces as a DownloadError, which is
+            # expected when the user cancelled or paused.
+            if self.cancel_requested:
+                self.queue_log("[download] Cancelled by user.\n")
+                self.after(0, self._close_panel)
+            elif self.is_paused:
+                self.queue_log("[download] Paused by user.\n")
+                self.after(0, lambda: self.speed_label.configure(text="Status: Paused", text_color=COLORS["accent_crimson"]))
+            else:
                 self.after(0, lambda err=e: messagebox.showerror("Download Error", str(err)))
                 self.after(0, self._close_panel)
         except Exception as e:
             self.after(0, lambda err=e: messagebox.showerror("Download Error", str(err)))
             self.after(0, self._close_panel)
+        finally:
+            self._cleanup_aria2c()
+
+    def _start_aria2c_monitor(self, ydl, info):
+        protocols = {info.get("protocol") or ""}
+        for fmt in info.get("requested_formats") or []:
+            protocols.add(fmt.get("protocol") or "")
+        if not protocols & {"http", "https"}:
+            return
+
+        try:
+            filename = ydl.prepare_filename(info)
+        except Exception:
+            filename = ""
+        out_dir = os.path.dirname(filename) or os.path.dirname(self.ydl_opts.get("outtmpl", ""))
+        prefix = os.path.splitext(os.path.basename(filename))[0]
+
+        total_bytes = info.get("filesize") or info.get("filesize_approx") or 0
+        requested = info.get("requested_formats") or []
+        if requested:
+            total_bytes = sum(
+                (fmt.get("filesize") or fmt.get("filesize_approx") or 0) for fmt in requested
+            )
+
+        done = threading.Event()
+        self._aria2c_done = done
+        threading.Thread(
+            target=_watch_aria2c_progress,
+            args=(self, self.aria2c_marker, out_dir, prefix, total_bytes, done),
+            daemon=True,
+        ).start()
+
+    def _terminate_aria2c(self):
+        marker = self.aria2c_marker
+        if marker:
+            threading.Thread(target=terminate_aria2c, args=(marker,), daemon=True).start()
+
+    def _cleanup_aria2c(self):
+        self._aria2c_done.set()
+        marker = self.aria2c_marker
+        self.aria2c_marker = None
+        if marker:
+            try:
+                os.remove(marker)
+            except OSError:
+                pass
 
     def load_thumbnail(self, url):
         try:
@@ -289,6 +477,7 @@ class DownloadCard(ctk.CTkFrame):
             self.is_paused = True
             self.pause_btn.configure(text="Resume", fg_color=COLORS["accent_crimson"], text_color="white")
             self.queue_log("[download] Pausing...\n")
+            self._terminate_aria2c()
         else:
             self.is_paused = False
             self.pause_btn.configure(text="Pause", fg_color="transparent", text_color="white")
@@ -300,6 +489,7 @@ class DownloadCard(ctk.CTkFrame):
     def stop_download(self):
         self.cancel_requested = True
         self.queue_log("[download] Cancel requested...\n")
+        self._terminate_aria2c()
         self._close_panel()
 
     def _close_panel(self):
@@ -488,6 +678,8 @@ class DownloadingPanel(ctk.CTkFrame):
         self.log_box.pack_forget()
 
         self.is_paused = False
+        self.aria2c_marker = None
+        self._aria2c_done = threading.Event()
         self.update_idletasks()
         self.download_thread = threading.Thread(target=self.start_download, daemon=True)
         self.download_thread.start()
@@ -506,6 +698,10 @@ class DownloadingPanel(ctk.CTkFrame):
             runtime_opts["logger"] = YdlPanelLogger(self)
             runtime_opts["progress_hooks"] = [self.on_progress_update]
 
+            self.aria2c_marker = _new_aria2c_marker()
+            if not apply_aria2c_options(runtime_opts, self.aria2c_marker):
+                self.aria2c_marker = None
+
             with yt_dlp.YoutubeDL(runtime_opts) as ydl:
                 info = ydl.extract_info(self.url, download=False)
 
@@ -515,6 +711,14 @@ class DownloadingPanel(ctk.CTkFrame):
                     title = f"Playlist: {title}"
 
                 self.after(0, lambda t=title: self.title_label.configure(text=t))
+
+                if self.aria2c_marker:
+                    self._start_aria2c_monitor(ydl, info)
+
+                if self.cancel_requested:
+                    raise DownloadCancelled()
+                if self.is_paused:
+                    raise DownloadPaused()
 
                 ydl.download([self.url])
 
@@ -533,12 +737,66 @@ class DownloadingPanel(ctk.CTkFrame):
                 self.queue_log("[download] Cancelled by user.\n")
                 self.after(0, self._close_panel)
         except yt_dlp.utils.DownloadError as e:
-            if not self.cancel_requested:
+            # Killing aria2c mid-download surfaces as a DownloadError, which is
+            # expected when the user cancelled or paused.
+            if self.cancel_requested:
+                self.queue_log("[download] Cancelled by user.\n")
+                self.after(0, self._close_panel)
+            elif self.is_paused:
+                self.queue_log("[download] Paused by user.\n")
+                self.after(0, lambda: self.speed_label.configure(text="Status: Paused", text_color=COLORS["accent_crimson"]))
+            else:
                 self.after(0, lambda err=e: messagebox.showerror("Download Error", str(err)))
                 self.after(0, self._close_panel)
         except Exception as e:
             self.after(0, lambda err=e: messagebox.showerror("Download Error", str(err)))
             self.after(0, self._close_panel)
+        finally:
+            self._cleanup_aria2c()
+
+    def _start_aria2c_monitor(self, ydl, info):
+        protocols = {info.get("protocol") or ""}
+        for fmt in info.get("requested_formats") or []:
+            protocols.add(fmt.get("protocol") or "")
+        if not protocols & {"http", "https"}:
+            return
+
+        try:
+            filename = ydl.prepare_filename(info)
+        except Exception:
+            filename = ""
+        out_dir = os.path.dirname(filename) or os.path.dirname(self.ydl_opts.get("outtmpl", ""))
+        prefix = os.path.splitext(os.path.basename(filename))[0]
+
+        total_bytes = info.get("filesize") or info.get("filesize_approx") or 0
+        requested = info.get("requested_formats") or []
+        if requested:
+            total_bytes = sum(
+                (fmt.get("filesize") or fmt.get("filesize_approx") or 0) for fmt in requested
+            )
+
+        done = threading.Event()
+        self._aria2c_done = done
+        threading.Thread(
+            target=_watch_aria2c_progress,
+            args=(self, self.aria2c_marker, out_dir, prefix, total_bytes, done),
+            daemon=True,
+        ).start()
+
+    def _terminate_aria2c(self):
+        marker = self.aria2c_marker
+        if marker:
+            threading.Thread(target=terminate_aria2c, args=(marker,), daemon=True).start()
+
+    def _cleanup_aria2c(self):
+        self._aria2c_done.set()
+        marker = self.aria2c_marker
+        self.aria2c_marker = None
+        if marker:
+            try:
+                os.remove(marker)
+            except OSError:
+                pass
 
     def on_finish(self):
         messagebox.showinfo("Download Completed!", "Audio files downloaded successfully.")
@@ -559,6 +817,7 @@ class DownloadingPanel(ctk.CTkFrame):
             self.is_paused = True
             self.pause_btn.configure(text="Resume", fg_color=COLORS["accent_crimson"], text_color="white")
             self.queue_log("[download] Pausing...\n")
+            self._terminate_aria2c()
         else:
             self.is_paused = False
             self.pause_btn.configure(text="Pause", fg_color="transparent", text_color="white")
@@ -570,6 +829,7 @@ class DownloadingPanel(ctk.CTkFrame):
     def stop_download(self):
         self.cancel_requested = True
         self.queue_log("[download] Cancel requested...\n")
+        self._terminate_aria2c()
         self._close_panel()
 
     def _close_panel(self):
